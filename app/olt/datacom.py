@@ -24,7 +24,7 @@ def converter_potencia(medida: Medida, bruto: int) -> float | None:
 
 
 class DriverDatacom(DriverOLT):
-    async def listar_onus(self) -> list[OnuLida]:
+    async def listar_onus(self, posicao: PosicaoPon | None = None) -> list[OnuLida]:
         raise NotImplementedError("PENDENTE: OIDs da Datacom não validados")
 
     async def ler_onu(self, posicao: PosicaoPon, onu_id: int) -> OnuLida | None:

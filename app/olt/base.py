@@ -9,14 +9,31 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from ipaddress import IPv4Address, IPv6Address
-from typing import Literal
+from typing import Literal, get_args
 
 from app.config import CredenciaisOlt
 
+# Mesmos valores do CHECK de olts.fabricante.
 Fabricante = Literal["huawei", "datacom"]
 
 # As três medidas de potência, com o mesmo significado das colunas de leituras_sinal.
 Medida = Literal["rx_onu", "tx_onu", "rx_olt"]
+
+
+class ErroOlt(Exception):
+    """Base dos erros de leitura de OLT. Todo driver só lança erros desta hierarquia.
+
+    Nenhuma mensagem pode conter community, senha ou usuário.
+    """
+
+
+class OltInacessivel(ErroOlt):
+    """Não deu para falar com a OLT: timeout, sem resposta ou credencial recusada."""
+
+
+class RespostaInesperada(ErroOlt):
+    """A OLT respondeu, mas num formato que o driver não entende (OID ausente, valor fora do
+    padrão)."""
 
 
 @dataclass(frozen=True)
@@ -28,6 +45,10 @@ class DadosOlt:
     endereco_ip: IPv4Address | IPv6Address
     snmp_porta: int = 161
     ssh_porta: int = 22
+
+    def __post_init__(self) -> None:
+        if self.fabricante not in get_args(Fabricante):
+            raise ValueError(f"fabricante desconhecido: {self.fabricante!r}")
 
 
 @dataclass(frozen=True)
@@ -47,6 +68,8 @@ class OnuLida:
     onu_id: int
     lida_em: datetime  # com fuso horário
     serial: str | None
+    # Nome/descrição da ONU exatamente como veio da OLT, sem interpretar. É daqui que
+    # app/coleta/nomes.py extrai caixa e porta.
     nome_na_olt: str | None
     # PENDENTE: validar com NOC/bancada os valores de status de cada fabricante. Até lá,
     # guarda o valor como veio da OLT, sem interpretar.
@@ -75,8 +98,9 @@ class DriverOLT(ABC):
         self.credenciais = credenciais
 
     @abstractmethod
-    async def listar_onus(self) -> list[OnuLida]:
-        """Todas as ONUs provisionadas na OLT, com o sinal de cada uma."""
+    async def listar_onus(self, posicao: PosicaoPon | None = None) -> list[OnuLida]:
+        """ONUs provisionadas, com o sinal de cada uma: só as da PON indicada ou, sem filtro,
+        as da OLT inteira. Quando só uma PON interessa, filtre: ler a OLT inteira pesa nela."""
 
     @abstractmethod
     async def ler_onu(self, posicao: PosicaoPon, onu_id: int) -> OnuLida | None:
