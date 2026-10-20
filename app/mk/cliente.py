@@ -120,6 +120,10 @@ class ClienteMk:
         # chamadas concorrentes deste cliente.
         self._vagas = asyncio.Semaphore(max_simultaneas)
         self._token: SecretStr | None = None
+        # Sobe a cada login. Quem recebeu "token expirado" compara a geração que usou com a
+        # atual para saber se outra chamada já renovou; comparar o valor do token não serve,
+        # porque o MK pode devolver o mesmo token num novo login.
+        self._geracao = 0
         self._expira_em: datetime | None = None
         # Do último login, como vieram (formato ainda não validado).
         self.limite_uso: Any = None
@@ -173,34 +177,35 @@ class ClienteMk:
         if reservados := PARAMETROS_RESERVADOS & parametros.keys():
             raise ValueError(f"parâmetros reservados ao cliente: {sorted(reservados)}")
 
-        token = await self._token_valido()
+        # Cada _get pega uma vaga do limite de simultâneas e a devolve ao terminar. Por isso
+        # a reautenticação abaixo, que também precisa de vaga, nunca espera por uma vaga
+        # presa por esta mesma consulta.
+        token, geracao = await self._token_valido()
         corpo = await self._get(
             servico, {**parametros, "token": token.get_secret_value()}, timeout_http
         )
         if token_expirado(corpo):
             log.info("MK %s: token expirado; reautenticando e repetindo uma vez", servico)
-            token = await self._renovar(token_recusado=token)
+            token = await self._renovar(geracao_recusada=geracao)
             corpo = await self._get(
                 servico, {**parametros, "token": token.get_secret_value()}, timeout_http
             )
         verificar_sucesso(servico, corpo, self._segredos())
         return corpo
 
-    async def _token_valido(self) -> SecretStr:
+    async def _token_valido(self) -> tuple[SecretStr, int]:
         if self._token_em_dia():
-            return self._token
+            return self._token, self._geracao
         async with self._lock:
             # Quem esperou o lock encontra o token já renovado por outra chamada.
-            if self._token_em_dia():
-                return self._token
-            await self._autenticar()
-            return self._token
+            if not self._token_em_dia():
+                await self._autenticar()
+            return self._token, self._geracao
 
-    async def _renovar(self, token_recusado: SecretStr) -> SecretStr:
+    async def _renovar(self, geracao_recusada: int) -> SecretStr:
         async with self._lock:
-            if self._token is not None and self._token != token_recusado and self._token_em_dia():
-                return self._token  # outra chamada já renovou
-            await self._autenticar()
+            if self._geracao == geracao_recusada or not self._token_em_dia():
+                await self._autenticar()  # senão, outra chamada já renovou
             return self._token
 
     def _token_em_dia(self) -> bool:
@@ -231,6 +236,7 @@ class ClienteMk:
             ) from None
         self._token = SecretStr(str(corpo["Token"]))
         self._expira_em = expira_em
+        self._geracao += 1
         self.limite_uso = corpo.get("LimiteUso")
         self.servicos_autorizados = corpo.get("ServicosAutorizados")
         log.info("MK: autenticado; token válido até %s", expira_em.isoformat())
