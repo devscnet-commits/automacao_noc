@@ -28,6 +28,18 @@ services:
     env_file:
       - path: .env
         required: false
+    # Conexão por partes + senha do mesmo secret do Postgres. Tem prioridade sobre
+    # a DATABASE_URL que vem do .env (aquela aponta para 127.0.0.1 e é do dbmate).
+    environment:
+      NOC_DB_HOST: db
+      NOC_DB_PORTA: "5432"
+      NOC_DB_USUARIO: noc
+      NOC_DB_NOME: noc
+      NOC_DB_PASSWORD_FILE: /run/secrets/postgres_password
+    # Fora do Swarm o secret é só um bind mount (uid/mode são ignorados): por isso o arquivo
+    # no host pertence ao UID 10001, o mesmo do usuário noc da imagem.
+    secrets:
+      - postgres_password
     depends_on:
       db:
         condition: service_healthy

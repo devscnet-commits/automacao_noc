@@ -62,6 +62,16 @@ secrets/      senhas usadas pelo docker-compose (fora do git)
 Toda configuração vem de variáveis de ambiente (veja `.env.example`). Padrão de nomes:
 prefixo `NOC_`, exceto `DATABASE_URL`, que é o nome fixo lido pelo dbmate.
 
+Conexão da aplicação com o banco (implementada em `app/config.py`):
+
+1. Se `NOC_DB_PASSWORD_FILE` estiver definida, a conexão é montada com `NOC_DB_HOST`,
+   `NOC_DB_PORTA`, `NOC_DB_USUARIO`, `NOC_DB_NOME` e a senha lida desse arquivo
+   (o mesmo secret do Postgres). A `DATABASE_URL` é ignorada. É o caso do container.
+2. Senão, usa a `DATABASE_URL`. É o caso do dbmate no host e do desenvolvimento local.
+
+O arquivo tem prioridade porque o container recebe o `.env` inteiro, e a `DATABASE_URL`
+dali aponta para `127.0.0.1`, que dentro do container não é o banco.
+
 Credenciais das OLTs: há um padrão global (`NOC_OLT_SNMP_*`, `NOC_OLT_SSH_*`) e cada OLT
 pode sobrescrever qualquer campo em `NOC_OLT_SOBRESCRITAS`, um JSON indexado pelo nome
 da OLT. A versão do SNMP também é por OLT. SNMPv3 ainda não está implementado.
@@ -75,12 +85,32 @@ Use só caracteres hexadecimais para não precisar escapar nada na `DATABASE_URL
 mkdir -p secrets
 openssl rand -hex 24 > secrets/postgres_password.txt
 chmod 600 secrets/postgres_password.txt
-cp .env.example .env   # coloque a mesma senha na DATABASE_URL
+cp .env.example .env && chmod 600 .env
+# coloque no .env a mesma senha, dentro da DATABASE_URL (no lugar de TROCAR)
+sudo chown 10001:10001 secrets/postgres_password.txt
 docker compose up -d db
 docker compose ps      # db deve ficar "healthy"
 ```
 
+O dono do arquivo é o UID 10001 porque é o usuário `noc` do container da aplicação
+que lê a senha dele; fora do Swarm, o Docker monta o arquivo com o dono e a permissão
+que ele tem no host. O Postgres lê o arquivo como root na inicialização.
+
 A porta 5432 fica ligada só em `127.0.0.1`.
+
+### Migrações (dbmate)
+
+O dbmate roda no host e lê a `DATABASE_URL` do `.env` sozinho:
+
+```bash
+dbmate up        # aplica as migrações pendentes
+dbmate status    # lista aplicadas/pendentes
+dbmate rollback  # desfaz a última
+```
+
+Não geramos `db/schema.sql` (`DBMATE_NO_DUMP_SCHEMA=true`), porque isso exigiria
+`pg_dump` 16 no host e o Debian 12 traz o 15. Para ver o esquema:
+`docker compose exec db psql -U noc -d noc -c '\d+ onus'`.
 
 ## Desenvolvimento local
 
