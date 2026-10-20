@@ -28,25 +28,29 @@ services:
     env_file:
       - path: .env
         required: false
-    # Conexão por partes + senha do mesmo secret do Postgres. Tem prioridade sobre
-    # a DATABASE_URL que vem do .env (aquela aponta para 127.0.0.1 e é do dbmate).
+    # A aplicação conecta como noc_app (nunca como noc) e não lê a DATABASE_URL do .env,
+    # que é só do dbmate no host.
     environment:
       NOC_DB_HOST: db
       NOC_DB_PORTA: "5432"
-      NOC_DB_USUARIO: noc
+      NOC_DB_USUARIO: noc_app
       NOC_DB_NOME: noc
-      NOC_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      NOC_DB_PASSWORD_FILE: /run/secrets/noc_app_password
     # Fora do Swarm o secret é só um bind mount (uid/mode são ignorados): por isso o arquivo
     # no host tem grupo 10001 (o GID do usuário noc da imagem) e modo 640.
     secrets:
-      - postgres_password
+      - noc_app_password
     depends_on:
       db:
         condition: service_healthy
 
 secrets:
+  # Senha do noc (superusuário, dono das tabelas): só o Postgres lê, como root. Modo 600.
   postgres_password:
     file: ./secrets/postgres_password.txt
+  # Senha do noc_app (aplicação): grupo 10001, modo 640.
+  noc_app_password:
+    file: ./secrets/noc_app_password.txt
 
 volumes:
   pgdata:

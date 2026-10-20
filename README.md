@@ -62,15 +62,16 @@ secrets/      senhas usadas pelo docker-compose (fora do git)
 Toda configuração vem de variáveis de ambiente (veja `.env.example`). Padrão de nomes:
 prefixo `NOC_`, exceto `DATABASE_URL`, que é o nome fixo lido pelo dbmate.
 
-Conexão da aplicação com o banco (implementada em `app/config.py`):
+Banco de dados: dois papéis.
 
-1. Se `NOC_DB_PASSWORD_FILE` estiver definida, a conexão é montada com `NOC_DB_HOST`,
-   `NOC_DB_PORTA`, `NOC_DB_USUARIO`, `NOC_DB_NOME` e a senha lida desse arquivo
-   (o mesmo secret do Postgres). A `DATABASE_URL` é ignorada. É o caso do container.
-2. Senão, usa a `DATABASE_URL`. É o caso do dbmate no host e do desenvolvimento local.
+| Papel     | Quem usa            | Permissões                                                  | Credencial                                    |
+|-----------|---------------------|-------------------------------------------------------------|-----------------------------------------------|
+| `noc`     | só o dbmate (host)  | superusuário, dono das tabelas                              | `DATABASE_URL` + `secrets/postgres_password.txt` |
+| `noc_app` | a aplicação         | SELECT/INSERT/UPDATE nas tabelas de rede; `leituras_sinal` só SELECT/INSERT; nenhum DELETE | `NOC_DB_*` + `secrets/noc_app_password.txt` |
 
-O arquivo tem prioridade porque o container recebe o `.env` inteiro, e a `DATABASE_URL`
-dali aponta para `127.0.0.1`, que dentro do container não é o banco.
+A aplicação monta a conexão com `NOC_DB_HOST`, `NOC_DB_PORTA`, `NOC_DB_USUARIO`,
+`NOC_DB_NOME` e a senha lida do arquivo em `NOC_DB_PASSWORD_FILE`. Ela **não lê** a
+`DATABASE_URL` e se recusa a operar se o papel conectado for superusuário.
 
 Credenciais das OLTs: há um padrão global (`NOC_OLT_SNMP_*`, `NOC_OLT_SSH_*`) e cada OLT
 pode sobrescrever qualquer campo em `NOC_OLT_SOBRESCRITAS`, um JSON indexado pelo nome
@@ -78,26 +79,37 @@ da OLT. A versão do SNMP também é por OLT. SNMPv3 ainda não está implementa
 
 ## Banco de dados
 
-A senha do PostgreSQL fica num arquivo fora do git, montado como secret do Docker.
-Use só caracteres hexadecimais para não precisar escapar nada na `DATABASE_URL`:
+As senhas ficam em arquivos fora do git, montados como secrets do Docker. Use só
+caracteres hexadecimais (`openssl rand -hex`), para não precisar escapar nada.
 
 ```bash
 mkdir -p secrets
+# noc (superusuário, migrações): só o Postgres lê, como root
 openssl rand -hex 24 > secrets/postgres_password.txt
 chmod 600 secrets/postgres_password.txt
-sudo chgrp 10001 secrets/postgres_password.txt
-chmod 640 secrets/postgres_password.txt
+# noc_app (aplicação): o container da aplicação lê pelo grupo 10001
+openssl rand -hex 24 > secrets/noc_app_password.txt
+sudo chgrp 10001 secrets/noc_app_password.txt
+chmod 640 secrets/noc_app_password.txt
+
 cp .env.example .env && chmod 600 .env
-# coloque no .env a mesma senha, dentro da DATABASE_URL (no lugar de TROCAR)
+# coloque no .env a senha do noc dentro da DATABASE_URL (no lugar de TROCAR)
+
 docker compose up -d db
-docker compose ps      # db deve ficar "healthy"
+docker compose ps                     # db deve ficar "healthy"
+dbmate up                             # tabelas + papel noc_app (sem login)
+./scripts/definir_senha_noc_app.sh    # ativa o login do noc_app com a senha do arquivo
 ```
 
-Permissão do secret: dono = seu usuário no host, grupo = GID 10001, modo 640. Fora do
-Swarm, o Docker monta o arquivo com o dono e a permissão que ele tem no host; o usuário
-`noc` do container da aplicação (UID/GID 10001) lê pelo grupo, e você continua lendo sem
-sudo. O `chgrp` precisa de sudo porque seu usuário não faz parte do grupo 10001 (que nem
-precisa existir no host). O Postgres lê o arquivo como root na inicialização.
+Para trocar a senha do `noc_app`, gere um novo `secrets/noc_app_password.txt` (mesma
+permissão) e rode o script de novo.
+
+Permissão do secret do `noc_app`: dono = seu usuário no host, grupo = GID 10001, modo 640.
+Fora do Swarm, o Docker monta o arquivo com o dono e a permissão que ele tem no host; o
+usuário `noc` do container da aplicação (UID/GID 10001) lê pelo grupo, e você continua
+lendo sem sudo. O `chgrp` precisa de sudo porque seu usuário não faz parte do grupo 10001
+(que nem precisa existir no host). O secret do `noc` fica 600: só o Postgres o lê, como
+root, na inicialização.
 
 A porta 5432 fica ligada só em `127.0.0.1`.
 
