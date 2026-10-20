@@ -37,6 +37,11 @@ log = logging.getLogger(__name__)
 FUSO_MK = ZoneInfo("America/Sao_Paulo")  # o Expire vem no horário de Brasília
 FORMATO_EXPIRE = "%d/%m/%Y %H:%M:%S"
 MARGEM_RENOVACAO = timedelta(minutes=2)
+# Leitura costuma ser rápida. Escrita (futura) é bem mais lenta: a documentação do MK mostra
+# de 8 s a mais de 30 s, então o método de escrita vai precisar de um timeout próprio, maior.
+TIMEOUT_CONSULTA = 15.0
+# O MK é o ERP de produção dos atendentes: o sistema não pode competir com eles.
+MAX_SIMULTANEAS = 4
 SISTEMA = "MK0"
 SERVICO_AUTENTICACAO = "WSAutenticacao"
 CD_SERVICO_AUTENTICACAO = "9999"
@@ -86,7 +91,8 @@ class ClienteMk:
         contra_senha: SecretStr | None,
         *,
         ca_bundle: Path | None = None,
-        timeout: float = 15.0,
+        timeout: float = TIMEOUT_CONSULTA,
+        max_simultaneas: int = MAX_SIMULTANEAS,
         transport: httpx.AsyncBaseTransport | None = None,  # testes: httpx.MockTransport
         relogio: Callable[[], datetime] = lambda: datetime.now(FUSO_MK),
     ) -> None:
@@ -110,6 +116,9 @@ class ClienteMk:
         self._contra_senha = contra_senha
         self._relogio = relogio
         self._lock = asyncio.Lock()
+        # Teto de requisições em andamento ao MK (inclusive autenticação), somando todas as
+        # chamadas concorrentes deste cliente.
+        self._vagas = asyncio.Semaphore(max_simultaneas)
         self._token: SecretStr | None = None
         self._expira_em: datetime | None = None
         # Do último login, como vieram (formato ainda não validado).
@@ -145,10 +154,16 @@ class ClienteMk:
         await self._http.aclose()
 
     async def consultar(
-        self, servico: str, parametros: dict[str, str | int] | None = None
+        self,
+        servico: str,
+        parametros: dict[str, str | int] | None = None,
+        *,
+        timeout_http: float | None = None,
     ) -> Corpo:
         """Chamada de LEITURA a /mk/<servico>.rule. Devolve o corpo JSON já verificado.
 
+        timeout_http (segundos) substitui o padrão do cliente só nesta chamada. Vale para cada
+        requisição HTTP; a espera por vaga no limite de simultâneas não conta.
         Se o MK disser que o token expirou, reautentica e repete UMA vez. Um futuro método de
         escrita não pode fazer isso: o erro sobe, sem repetição automática.
         """
@@ -159,11 +174,15 @@ class ClienteMk:
             raise ValueError(f"parâmetros reservados ao cliente: {sorted(reservados)}")
 
         token = await self._token_valido()
-        corpo = await self._get(servico, {**parametros, "token": token.get_secret_value()})
+        corpo = await self._get(
+            servico, {**parametros, "token": token.get_secret_value()}, timeout_http
+        )
         if token_expirado(corpo):
             log.info("MK %s: token expirado; reautenticando e repetindo uma vez", servico)
             token = await self._renovar(token_recusado=token)
-            corpo = await self._get(servico, {**parametros, "token": token.get_secret_value()})
+            corpo = await self._get(
+                servico, {**parametros, "token": token.get_secret_value()}, timeout_http
+            )
         verificar_sucesso(servico, corpo, self._segredos())
         return corpo
 
@@ -216,12 +235,17 @@ class ClienteMk:
         self.servicos_autorizados = corpo.get("ServicosAutorizados")
         log.info("MK: autenticado; token válido até %s", expira_em.isoformat())
 
-    async def _get(self, servico: str, parametros: dict[str, str | int]) -> Corpo:
+    async def _get(
+        self, servico: str, parametros: dict[str, str | int], timeout_http: float | None = None
+    ) -> Corpo:
         """GET em /mk/<servico>.rule. Erros só citam o serviço, nunca a URL."""
         try:
-            resposta = await self._http.get(
-                f"/mk/{servico}.rule", params={"sys": SISTEMA, **parametros}
-            )
+            async with self._vagas:
+                resposta = await self._http.get(
+                    f"/mk/{servico}.rule",
+                    params={"sys": SISTEMA, **parametros},
+                    timeout=httpx.USE_CLIENT_DEFAULT if timeout_http is None else timeout_http,
+                )
         except httpx.HTTPError as erro:
             raise MkInacessivel(f"{servico}: {type(erro).__name__}") from None
         if resposta.status_code >= 500:
