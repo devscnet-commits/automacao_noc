@@ -48,6 +48,12 @@ CD_SERVICO_AUTENTICACAO = "9999"
 PARAMETROS_RESERVADOS = {"sys", "token"}
 NOME_DE_SERVICO = re.compile(r"[A-Za-z0-9_]+")
 
+# PENDENTE: validar com o provedor/MK. Release do MK ERP instalado e quais APIs especiais
+# (pagas à parte) estão contratadas; os métodos de escrita dependem disso. O campo
+# ServicosAutorizados do login (guardado em servicos_autorizados) ajuda a responder.
+RELEASE_MK: str | None = None
+APIS_ESPECIAIS_CONTRATADAS: frozenset[str] | None = None
+
 Corpo = dict[str, Any]
 
 
@@ -125,7 +131,8 @@ class ClienteMk:
         # porque o MK pode devolver o mesmo token num novo login.
         self._geracao = 0
         self._expira_em: datetime | None = None
-        # Do último login, como vieram (formato ainda não validado).
+        # Do último login, como vieram. PENDENTE: validar com respostas reais o formato de
+        # LimiteUso e ServicosAutorizados.
         self.limite_uso: Any = None
         self.servicos_autorizados: Any = None
 
