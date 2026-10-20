@@ -12,6 +12,27 @@ permissions:
 jobs:
   testes:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          # Banco descartável, só existe durante o job.
+          POSTGRES_USER: noc
+          POSTGRES_PASSWORD: noc-ci
+          POSTGRES_DB: noc
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U noc -d noc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DBMATE_VERSAO: v2.37.0
+      DBMATE_SHA256: f855e99a0f0a81322014bf686b1cb820d2b4d8074e4eadafd64b851b80ecb15a
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,5 +53,40 @@ jobs:
       - name: Formatação
         run: ruff format --check .
 
+      - name: Migrações (dbmate)
+        env:
+          DATABASE_URL: postgres://noc:noc-ci@localhost:5432/noc?sslmode=disable
+          DBMATE_NO_DUMP_SCHEMA: "true"
+        run: |
+          curl -fsSL -o dbmate "https://github.com/amacneil/dbmate/releases/download/${DBMATE_VERSAO}/dbmate-linux-amd64"
+          echo "${DBMATE_SHA256}  dbmate" | sha256sum --check
+          chmod +x dbmate
+          ./dbmate --wait up
+          rm dbmate
+
+      - name: Senha do noc_app (só no banco do CI)
+        # Faz o mesmo que scripts/definir_senha_noc_app.sh, sem docker compose.
+        run: |
+          python - <<'PY'
+          import psycopg
+          from psycopg import sql
+
+          with psycopg.connect("postgresql://noc:noc-ci@localhost:5432/noc", autocommit=True) as c:
+              c.execute(sql.SQL("ALTER ROLE noc_app WITH LOGIN PASSWORD {}").format(sql.Literal("noc-app-ci")))
+          PY
+
+      - name: Instalar snmpsim (venv separado, só para os testes)
+        run: |
+          python -m venv "$RUNNER_TEMP/snmpsim"
+          "$RUNNER_TEMP/snmpsim/bin/pip" install "snmpsim==1.2.2" "pysmi==2.0.0"
+
       - name: Testes
-        run: pytest
+        env:
+          TESTE_PG_HOST: localhost
+          TESTE_PG_PORTA: "5432"
+          TESTE_PG_NOME: noc
+          TESTE_PG_SUPERUSUARIO: noc
+          TESTE_PG_SUPERUSUARIO_SENHA: noc-ci
+          TESTE_PG_APP_SENHA: noc-app-ci
+          TESTE_SNMPSIM_BIN: ${{ runner.temp }}/snmpsim/bin/snmpsim-command-responder
+        run: pytest -rs

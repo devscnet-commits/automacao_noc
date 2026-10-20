@@ -32,6 +32,10 @@ packages = ["app"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "banco: precisa de PostgreSQL com as migrações aplicadas (variáveis TESTE_PG_*)",
+    "snmpsim: precisa do agente snmpsim (variável TESTE_SNMPSIM_BIN)",
+]
 
 [tool.ruff]
 target-version = "py312"

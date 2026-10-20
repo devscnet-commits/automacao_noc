@@ -170,8 +170,34 @@ uv pip install -e ".[dev]"
 ```bash
 ruff check .            # lint
 ruff format --check .   # formatação
-pytest                  # testes
+pytest -rs              # testes (-rs mostra o motivo de cada teste pulado)
 ```
+
+### Testes de integração
+
+Dois grupos de teste precisam de serviço de verdade e, fora do CI, só rodam quando as
+variáveis abaixo existem (sem elas, aparecem como pulados). No CI eles são obrigatórios:
+com `CI=true`, variável faltando faz o teste falhar em vez de pular.
+
+- `banco` (`tests/test_db.py`): recusa de superusuário e privilégios do `noc_app`. Use um
+  banco **descartável**, com as migrações aplicadas e a senha do `noc_app` definida. Nada é
+  gravado (rollback), mas não aponte para o banco de produção.
+
+  ```bash
+  TESTE_PG_HOST=127.0.0.1 TESTE_PG_PORTA=5432 TESTE_PG_NOME=noc \
+  TESTE_PG_SUPERUSUARIO=noc TESTE_PG_SUPERUSUARIO_SENHA="$(cat secrets/postgres_password.txt)" \
+  TESTE_PG_APP_SENHA="$(cat secrets/noc_app_password.txt)" \
+  pytest -m banco
+  ```
+
+- `snmpsim` (`tests/test_snmp_integracao.py`): walk SNMP contra um agente simulado (OIDs
+  fictícios). O teste sobe e derruba o agente sozinho; só precisa do snmpsim instalado num
+  venv separado:
+
+  ```bash
+  python3.12 -m venv /tmp/snmpsim && /tmp/snmpsim/bin/pip install "snmpsim==1.2.2" "pysmi==2.0.0"
+  TESTE_SNMPSIM_BIN=/tmp/snmpsim/bin/snmpsim-command-responder pytest -m snmpsim
+  ```
 
 ## Container da aplicação
 
