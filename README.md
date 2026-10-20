@@ -51,6 +51,21 @@ Pendências conhecidas:
   Variáveis de outros prefixos (`DATABASE_URL`, `DBMATE_*`) são ignoradas.
 - **Credenciais do MK e das OLTs são opcionais na carga**: quem vai usar valida. A coleta das
   OLTs roda sem o MK configurado.
+- **Drivers de OLT: sondagem antes dos walks.** Antes de ler as tabelas de uma OLT, o driver
+  faz uma consulta barata (sysUpTime ou sysDescr). Se ela falhar, a OLT inteira é marcada
+  `OltInacessivel` sem tentar as demais tabelas (evita esperar um timeout por tabela).
+- **Serial da ONU: uma única função de normalização**, usada para o que vem da OLT, o que o
+  técnico digita e o que vai para o MK. Formato canônico: PENDENTE (validar em bancada e com
+  o MK).
+- **Cliente MK:**
+  - só HTTPS, com verificação de certificado sempre ligada; se o MK usar certificado próprio,
+    aponte `NOC_MK_CA_BUNDLE` para o bundle da CA dele;
+  - o token é cacheado e renovado 2 minutos antes do `Expire`; com chamadas concorrentes, só
+    uma reautentica e as outras usam o token novo;
+  - chamada de leitura que recebe "token expirado" reautentica e repete uma vez; chamada de
+    escrita nunca é repetida automaticamente;
+  - a decisão de sucesso de uma resposta fica num lugar só (`verificar_sucesso`); na dúvida,
+    não é sucesso.
 
 ## Estrutura
 
