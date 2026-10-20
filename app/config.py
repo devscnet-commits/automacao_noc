@@ -66,6 +66,9 @@ class Configuracao(BaseSettings):
     mk_base_url: HttpUrl | None = None
     mk_token_usuario: SecretStr | None = None
     mk_contra_senha: SecretStr | None = None
+    # PENDENTE: validar com NOC/bancada se o MK do provedor usa certificado próprio. Se usar,
+    # aponte para o bundle da CA dele; a verificação de certificado nunca é desligada.
+    mk_ca_bundle: Path | None = None
 
     # Padrão global das OLTs: os mesmos campos de CredenciaisOlt, com prefixo olt_.
     olt_snmp_versao: VersaoSnmp | None = None
