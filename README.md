@@ -37,6 +37,21 @@ Pendências conhecidas:
 - campos de resposta das APIs MK além dos já documentados;
 - versão do SNMP (v2c/v3) e se a credencial é única ou por OLT.
 
+## Decisões
+
+- **Aplicação assíncrona (asyncio).** O walk SNMP (pysnmp 7) e o pool do banco
+  (`AsyncConnectionPool`) são assíncronos, e o cliente MK também será. Consequências:
+  - o agendador é o `AsyncIOScheduler` do APScheduler 3, rodando no mesmo laço de eventos;
+  - chamadas síncronas, como Netmiko/SSH, rodam via `asyncio.to_thread`, nunca direto numa
+    corrotina (travariam o laço inteiro enquanto esperam a OLT).
+- **A aplicação conecta como `noc_app`, nunca como `noc`**, e não lê a `DATABASE_URL`
+  (detalhes em Configuração).
+- **Variável `NOC_` desconhecida é erro**: a aplicação não sobe se encontrar no ambiente ou
+  no `.env` uma variável com esse prefixo que não reconhece (pega erro de digitação).
+  Variáveis de outros prefixos (`DATABASE_URL`, `DBMATE_*`) são ignoradas.
+- **Credenciais do MK e das OLTs são opcionais na carga**: quem vai usar valida. A coleta das
+  OLTs roda sem o MK configurado.
+
 ## Estrutura
 
 ```

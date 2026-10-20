@@ -11,9 +11,15 @@ from typing import Literal
 
 from psycopg.conninfo import make_conninfo
 from pydantic import BaseModel, ConfigDict, HttpUrl, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+PREFIXO = "NOC_"
 
 VersaoSnmp = Literal["v2c", "v3"]
+
+
+class VariavelDesconhecida(ValueError):
+    """Variável com prefixo NOC_ que não corresponde a nenhum campo (erro de digitação)."""
 
 
 class CredenciaisOlt(BaseModel):
@@ -39,10 +45,11 @@ class CredenciaisOlt(BaseModel):
 
 
 class Configuracao(BaseSettings):
-    # extra="ignore": o .env é compartilhado com o dbmate (DATABASE_URL, DBMATE_*).
+    # extra="ignore": o .env é compartilhado com o dbmate (DATABASE_URL, DBMATE_*). Variáveis
+    # com prefixo NOC_ desconhecidas são recusadas em settings_customise_sources.
     # env_ignore_empty: variável vazia (como no .env.example) conta como não definida.
     model_config = SettingsConfigDict(
-        env_prefix="NOC_",
+        env_prefix=PREFIXO,
         env_file=".env",
         extra="ignore",
         env_ignore_empty=True,
@@ -55,9 +62,10 @@ class Configuracao(BaseSettings):
     db_nome: str
     db_password_file: Path
 
-    mk_base_url: HttpUrl
-    mk_token_usuario: SecretStr
-    mk_contra_senha: SecretStr
+    # Opcionais na carga: a coleta das OLTs roda sem o MK. O cliente MK valida ao usar.
+    mk_base_url: HttpUrl | None = None
+    mk_token_usuario: SecretStr | None = None
+    mk_contra_senha: SecretStr | None = None
 
     # Padrão global das OLTs: os mesmos campos de CredenciaisOlt, com prefixo olt_.
     olt_snmp_versao: VersaoSnmp | None = None
@@ -74,6 +82,29 @@ class Configuracao(BaseSettings):
     olt_sobrescritas: dict[str, CredenciaisOlt] = {}
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Recusa variável NOC_ desconhecida, do ambiente ou do .env. Só cita o nome."""
+        conhecidas = {(PREFIXO + campo).lower() for campo in cls.model_fields}
+        lidas = {*env_settings.env_vars, *dotenv_settings.env_vars}  # chaves em minúsculas
+        desconhecidas = sorted(
+            nome.upper()
+            for nome in lidas
+            if nome.startswith(PREFIXO.lower()) and nome not in conhecidas
+        )
+        if desconhecidas:
+            raise VariavelDesconhecida(
+                "variáveis com prefixo NOC_ não reconhecidas: " + ", ".join(desconhecidas)
+            )
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
 
     def conninfo_banco(self) -> str:
         """String de conexão do psycopg, com a senha lida do arquivo. Nunca logar."""
@@ -95,6 +126,10 @@ class Configuracao(BaseSettings):
         sobrescrita = self.olt_sobrescritas.get(nome_olt)
         if sobrescrita is None:
             return padrao
+        # PENDENTE: validar com NOC/bancada. Ao implementar o SNMPv3, mudar esta mesclagem:
+        # hoje uma OLT com snmp_versao "v3" na sobrescrita herda a snmp_community (v2c) do
+        # padrão global, e os campos snmp_v3_* globais vazam para OLTs v2c. A mesclagem tem
+        # de considerar a versão efetiva e só herdar os campos daquela versão.
         return padrao.model_copy(update=sobrescrita.model_dump(exclude_unset=True))
 
 
