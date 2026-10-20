@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# UID/GID fixos: o secret da senha do banco, no host, pertence a 10001 (veja o README).
+# UID/GID fixos: o secret da senha do banco, no host, tem grupo 10001 e modo 640 (veja o README).
 RUN groupadd --system --gid 10001 noc \
     && useradd --system --uid 10001 --gid noc --home-dir /app --no-create-home \
        --shell /usr/sbin/nologin noc

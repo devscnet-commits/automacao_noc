@@ -37,7 +37,7 @@ services:
       NOC_DB_NOME: noc
       NOC_DB_PASSWORD_FILE: /run/secrets/postgres_password
     # Fora do Swarm o secret é só um bind mount (uid/mode são ignorados): por isso o arquivo
-    # no host pertence ao UID 10001, o mesmo do usuário noc da imagem.
+    # no host tem grupo 10001 (o GID do usuário noc da imagem) e modo 640.
     secrets:
       - postgres_password
     depends_on:

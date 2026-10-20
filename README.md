@@ -85,16 +85,19 @@ Use só caracteres hexadecimais para não precisar escapar nada na `DATABASE_URL
 mkdir -p secrets
 openssl rand -hex 24 > secrets/postgres_password.txt
 chmod 600 secrets/postgres_password.txt
+sudo chgrp 10001 secrets/postgres_password.txt
+chmod 640 secrets/postgres_password.txt
 cp .env.example .env && chmod 600 .env
 # coloque no .env a mesma senha, dentro da DATABASE_URL (no lugar de TROCAR)
-sudo chown 10001:10001 secrets/postgres_password.txt
 docker compose up -d db
 docker compose ps      # db deve ficar "healthy"
 ```
 
-O dono do arquivo é o UID 10001 porque é o usuário `noc` do container da aplicação
-que lê a senha dele; fora do Swarm, o Docker monta o arquivo com o dono e a permissão
-que ele tem no host. O Postgres lê o arquivo como root na inicialização.
+Permissão do secret: dono = seu usuário no host, grupo = GID 10001, modo 640. Fora do
+Swarm, o Docker monta o arquivo com o dono e a permissão que ele tem no host; o usuário
+`noc` do container da aplicação (UID/GID 10001) lê pelo grupo, e você continua lendo sem
+sudo. O `chgrp` precisa de sudo porque seu usuário não faz parte do grupo 10001 (que nem
+precisa existir no host). O Postgres lê o arquivo como root na inicialização.
 
 A porta 5432 fica ligada só em `127.0.0.1`.
 

@@ -38,8 +38,9 @@ CREATE TABLE pons (
 CREATE TABLE caixas (
     id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- Identificador como aparece no nome da ONU / no campo.
-    -- PENDENTE: validar com NOC/bancada se é único na rede toda ou só por OLT/PON.
-    identificador text        NOT NULL UNIQUE,
+    -- PENDENTE: validar com NOC/bancada o escopo de unicidade (provavelmente único só
+    -- dentro de POP/ramal). Até lá, sem UNIQUE: só um índice comum.
+    identificador text        NOT NULL,
     -- PENDENTE: validar com NOC/bancada se uma caixa é sempre atendida por uma única PON.
     pon_id        bigint      REFERENCES pons (id),
     -- PENDENTE: validar com NOC/bancada a capacidade das caixas.
@@ -47,6 +48,7 @@ CREATE TABLE caixas (
     criado_em     timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE INDEX caixas_identificador_idx ON caixas (identificador);
 CREATE INDEX caixas_pon_id_idx ON caixas (pon_id);
 
 -- ONU como vista na OLT (inventário). Não guarda dados de cliente nem de ativação.
@@ -74,6 +76,8 @@ CREATE INDEX onus_serial_idx ON onus (serial);
 CREATE INDEX onus_caixa_id_idx ON onus (caixa_id);
 
 -- Leitura de sinal óptico. Só inserção: uma linha por ONU por leitura.
+-- tipo: 'linha_de_base' (coleta noturna), 'ativacao' (leitura da instalação, a que é
+-- comparada com a linha de base) e 'manual' (pedida por alguém, fora desses fluxos).
 -- Potências já convertidas para dBm. NULL = não lida ou ONU offline.
 -- PENDENTE: validar com NOC/bancada a escala dos valores brutos, o valor sentinela de
 -- ONU offline e quais destas três medidas cada fabricante expõe.
@@ -81,11 +85,18 @@ CREATE TABLE leituras_sinal (
     id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     onu_id     bigint       NOT NULL REFERENCES onus (id),
     lido_em    timestamptz  NOT NULL DEFAULT now(),
-    tipo       text         NOT NULL CHECK (tipo IN ('linha_de_base', 'avulsa')),
-    rx_onu_dbm numeric(5, 2),  -- potência recebida pela ONU (downstream)
-    tx_onu_dbm numeric(5, 2),  -- potência transmitida pela ONU
-    rx_olt_dbm numeric(5, 2)   -- potência recebida pela OLT vinda desta ONU (upstream)
+    tipo       text         NOT NULL CHECK (tipo IN ('linha_de_base', 'ativacao', 'manual')),
+    rx_onu_dbm numeric(5, 2),
+    tx_onu_dbm numeric(5, 2),
+    rx_olt_dbm numeric(5, 2)
 );
+
+COMMENT ON COLUMN leituras_sinal.rx_onu_dbm IS
+    'Potência recebida pela ONU, em dBm (descida, 1490 nm). Comparável ao medidor do técnico.';
+COMMENT ON COLUMN leituras_sinal.rx_olt_dbm IS
+    'Potência recebida pela OLT vinda desta ONU, em dBm (subida, 1310 nm).';
+COMMENT ON COLUMN leituras_sinal.tx_onu_dbm IS
+    'Potência transmitida pela ONU, em dBm.';
 
 CREATE INDEX leituras_sinal_onu_lido_em_idx ON leituras_sinal (onu_id, lido_em DESC);
 
