@@ -47,21 +47,47 @@ app/
 db/
   migrations/ migrações SQL (dbmate)
 tests/        testes (pytest)
+secrets/      senhas usadas pelo docker-compose (fora do git)
 ```
 
 ## Requisitos
 
-- Python 3.12
-- Docker + Docker Compose (PostgreSQL 16)
+- Docker + Docker Compose (PostgreSQL 16 e, mais adiante, a própria aplicação)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) para desenvolvimento local
+  (ele baixa o Python 3.12 sozinho; o Debian 12 vem com 3.11)
 - [dbmate](https://github.com/amacneil/dbmate) para as migrações
 
-## Instalação para desenvolvimento
+## Configuração
+
+Toda configuração vem de variáveis de ambiente (veja `.env.example`). Padrão de nomes:
+prefixo `NOC_`, exceto `DATABASE_URL`, que é o nome fixo lido pelo dbmate.
+
+Credenciais das OLTs: há um padrão global (`NOC_OLT_SNMP_*`, `NOC_OLT_SSH_*`) e cada OLT
+pode sobrescrever qualquer campo em `NOC_OLT_SOBRESCRITAS`, um JSON indexado pelo nome
+da OLT. A versão do SNMP também é por OLT. SNMPv3 ainda não está implementado.
+
+## Banco de dados
+
+A senha do PostgreSQL fica num arquivo fora do git, montado como secret do Docker.
+Use só caracteres hexadecimais para não precisar escapar nada na `DATABASE_URL`:
 
 ```bash
-python3.12 -m venv .venv
+mkdir -p secrets
+openssl rand -hex 24 > secrets/postgres_password.txt
+chmod 600 secrets/postgres_password.txt
+cp .env.example .env   # coloque a mesma senha na DATABASE_URL
+docker compose up -d db
+docker compose ps      # db deve ficar "healthy"
+```
+
+A porta 5432 fica ligada só em `127.0.0.1`.
+
+## Desenvolvimento local
+
+```bash
+uv venv --python 3.12
 . .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env   # e preencha
+uv pip install -e ".[dev]"
 ```
 
 ## Comandos
@@ -70,4 +96,14 @@ cp .env.example .env   # e preencha
 ruff check .            # lint
 ruff format --check .   # formatação
 pytest                  # testes
+```
+
+## Container da aplicação
+
+O `Dockerfile` (python:3.12-slim, usuário não-root `noc`) já existe, mas o serviço `app`
+do compose fica no profile `app` e só sobe quando pedido, porque ainda não há ponto de
+entrada:
+
+```bash
+docker compose --profile app build app
 ```

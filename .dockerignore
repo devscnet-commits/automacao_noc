@@ -1,0 +1,15 @@
+# Segredos nunca entram na imagem
+.env
+.env.*
+secrets/
+
+.git/
+.venv/
+venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Não fazem parte da imagem da aplicação
+tests/
+db/
